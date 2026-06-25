@@ -35,7 +35,7 @@ public class RazorpayPaymentService {
     private final ApplicationEventPublisher eventPublisher;
 
     public void createOnlinePaymentOrderIfRequired(Order order) {
-        if (order.getPaymentMethod() == PaymentMethod.ONLINE && order.getRazorpayOrderId() == null) {
+        if (requiresRazorpayOrder(order)) {
             razorpayGatewayService.createOrder(order);
         }
     }
@@ -65,38 +65,69 @@ public class RazorpayPaymentService {
     }
 
     private void validatePayableOnlineOrder(Order order) {
-        if (order.getPaymentMethod() != PaymentMethod.ONLINE) {
+        if (!isOnlinePayment(order)) {
             throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Razorpay order can be created only for online payments");
         }
-        if (order.getPaymentStatus() == PaymentStatus.PAID) {
+        if (isPaymentCompleted(order)) {
             throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Order payment is already completed");
         }
-        if (order.getStatus() == OrderStatus.CANCELLED) {
+        if (isCancelled(order)) {
             throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Cancelled order cannot be paid");
         }
     }
 
     private void verifyRazorpayPaymentForOrder(Order order, VerifyRazorpayPaymentRequest request) {
-        if (order.getPaymentMethod() != PaymentMethod.ONLINE) {
-            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Razorpay verification is only for online payments");
-        }
-        if (order.getRazorpayOrderId() == null || !order.getRazorpayOrderId().equals(request.razorpayOrderId())) {
-            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Razorpay order id does not match");
-        }
-        if (order.getPaymentStatus() == PaymentStatus.PAID) {
+        requireOnlinePayment(order);
+        requireMatchingRazorpayOrderId(order, request);
+        if (isPaymentCompleted(order)) {
             return;
         }
-        boolean verified = razorpayGatewayService.verifySignature(
-                request.razorpayOrderId(),
-                request.razorpayPaymentId(),
-                request.razorpaySignature());
-        if (!verified) {
+        if (!isValidRazorpaySignature(request)) {
             order.setPaymentStatus(PaymentStatus.FAILED);
             throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Razorpay payment verification failed");
         }
         order.setPaymentStatus(PaymentStatus.PAID);
         order.setRazorpayPaymentId(request.razorpayPaymentId());
         order.setRazorpaySignature(request.razorpaySignature());
+    }
+
+    private void requireOnlinePayment(Order order) {
+        if (!isOnlinePayment(order)) {
+            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Razorpay verification is only for online payments");
+        }
+    }
+
+    private void requireMatchingRazorpayOrderId(Order order, VerifyRazorpayPaymentRequest request) {
+        if (!hasMatchingRazorpayOrderId(order, request)) {
+            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Razorpay order id does not match");
+        }
+    }
+
+    private boolean isValidRazorpaySignature(VerifyRazorpayPaymentRequest request) {
+        return razorpayGatewayService.verifySignature(
+                request.razorpayOrderId(),
+                request.razorpayPaymentId(),
+                request.razorpaySignature());
+    }
+
+    private boolean isOnlinePayment(Order order) {
+        return order.getPaymentMethod() == PaymentMethod.ONLINE;
+    }
+
+    private boolean requiresRazorpayOrder(Order order) {
+        return isOnlinePayment(order) && order.getRazorpayOrderId() == null;
+    }
+
+    private boolean isPaymentCompleted(Order order) {
+        return order.getPaymentStatus() == PaymentStatus.PAID;
+    }
+
+    private boolean isCancelled(Order order) {
+        return order.getStatus() == OrderStatus.CANCELLED;
+    }
+
+    private boolean hasMatchingRazorpayOrderId(Order order, VerifyRazorpayPaymentRequest request) {
+        return order.getRazorpayOrderId() != null && order.getRazorpayOrderId().equals(request.razorpayOrderId());
     }
 
     private void requireCustomer(User user) {

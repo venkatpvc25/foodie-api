@@ -60,12 +60,7 @@ public class AuthService {
 
         @Transactional
         public AuthResponse signupRestaurant(CustomerSignupRequest request) {
-                if (!authProperties.isRestaurantSignupEnabled()) {
-                        log.warn("Restaurant signup rejected because self-signup is disabled: email={}",
-                                        request.getEmail());
-                        throw new BusinessException(ErrorCode.ACCESS_DENIED,
-                                        "Restaurant signup is not enabled");
-                }
+                requireRestaurantSignupEnabled(request);
                 ensureEmailAvailable(request.getEmail());
                 ensurePhoneAvailable(request.getPhone());
 
@@ -79,12 +74,7 @@ public class AuthService {
 
         @Transactional
         public AuthResponse signupDeliveryPartner(CustomerSignupRequest request) {
-                if (!authProperties.isDeliveryPartnerSignupEnabled()) {
-                        log.warn("Delivery partner signup rejected because self-signup is disabled: email={}",
-                                        request.getEmail());
-                        throw new BusinessException(ErrorCode.ACCESS_DENIED,
-                                        "Delivery partner signup is not enabled");
-                }
+                requireDeliveryPartnerSignupEnabled(request);
                 ensureEmailAvailable(request.getEmail());
                 ensurePhoneAvailable(request.getPhone());
 
@@ -106,10 +96,7 @@ public class AuthService {
                                                         "Invalid credentials");
                                 });
 
-                if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
-                        log.warn("Login failed, invalid password: userId={}, email={}", user.getId(), user.getEmail());
-                        throw new BusinessException(ErrorCode.INVALID_CREDENTIALS, "Invalid credentials");
-                }
+                requireValidPassword(request, user);
 
                 log.info("Login successful: userId={}, email={}, role={}", user.getId(), user.getEmail(),
                                 user.getRole());
@@ -125,16 +112,8 @@ public class AuthService {
                                                         "Invalid refresh token");
                                 });
 
-                if (stored.isRevoked()) {
-                        log.warn("Refresh token rejected, token revoked: userId={}", stored.getUser().getId());
-                        throw new BusinessException(ErrorCode.TOKEN_REVOKED, "Token revoked");
-                }
-
-                if (stored.getExpiryDate().isBefore(Instant.now())) {
-                        log.warn("Refresh token rejected, token expired: userId={}, expiryDate={}",
-                                        stored.getUser().getId(), stored.getExpiryDate());
-                        throw new BusinessException(ErrorCode.TOKEN_EXPIRED, "Token expired");
-                }
+                requireRefreshTokenActive(stored);
+                requireRefreshTokenNotExpired(stored);
 
                 String newAccess = jwtService.generateAccessToken(
                                 stored.getUser().getEmail());
@@ -179,12 +158,7 @@ public class AuthService {
         public User getOrCreateInternallyVerifiedCustomer(String phone) {
                 return userRepository.findByPhone(phone)
                                 .map(user -> {
-                                        if (user.getRole() != Role.CUSTOMER && user.getRole() != Role.ADMIN) {
-                                                log.warn("Phone checkout rejected, phone belongs to non-customer role: userId={}, phone={}, role={}",
-                                                                user.getId(), phone, user.getRole());
-                                                throw new BusinessException(ErrorCode.VALIDATION_ERROR,
-                                                                "Phone number is already used by another account type");
-                                        }
+                                        requirePhoneCheckoutCustomer(user, phone);
                                         log.info("Phone checkout using existing customer: userId={}, phone={}",
                                                         user.getId(), phone);
                                         return user;
@@ -226,6 +200,55 @@ public class AuthService {
                 user.setPassword(passwordEncoder.encode(password));
                 user.setRole(role);
                 return userRepository.save(user);
+        }
+
+        private void requireRestaurantSignupEnabled(CustomerSignupRequest request) {
+                if (!authProperties.isRestaurantSignupEnabled()) {
+                        log.warn("Restaurant signup rejected because self-signup is disabled: email={}",
+                                        request.getEmail());
+                        throw new BusinessException(ErrorCode.ACCESS_DENIED,
+                                        "Restaurant signup is not enabled");
+                }
+        }
+
+        private void requireDeliveryPartnerSignupEnabled(CustomerSignupRequest request) {
+                if (!authProperties.isDeliveryPartnerSignupEnabled()) {
+                        log.warn("Delivery partner signup rejected because self-signup is disabled: email={}",
+                                        request.getEmail());
+                        throw new BusinessException(ErrorCode.ACCESS_DENIED,
+                                        "Delivery partner signup is not enabled");
+                }
+        }
+
+        private void requireValidPassword(LoginRequest request, User user) {
+                if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
+                        log.warn("Login failed, invalid password: userId={}, email={}", user.getId(), user.getEmail());
+                        throw new BusinessException(ErrorCode.INVALID_CREDENTIALS, "Invalid credentials");
+                }
+        }
+
+        private void requireRefreshTokenActive(RefreshToken stored) {
+                if (stored.isRevoked()) {
+                        log.warn("Refresh token rejected, token revoked: userId={}", stored.getUser().getId());
+                        throw new BusinessException(ErrorCode.TOKEN_REVOKED, "Token revoked");
+                }
+        }
+
+        private void requireRefreshTokenNotExpired(RefreshToken stored) {
+                if (stored.getExpiryDate().isBefore(Instant.now())) {
+                        log.warn("Refresh token rejected, token expired: userId={}, expiryDate={}",
+                                        stored.getUser().getId(), stored.getExpiryDate());
+                        throw new BusinessException(ErrorCode.TOKEN_EXPIRED, "Token expired");
+                }
+        }
+
+        private void requirePhoneCheckoutCustomer(User user, String phone) {
+                if (user.getRole() != Role.CUSTOMER && user.getRole() != Role.ADMIN) {
+                        log.warn("Phone checkout rejected, phone belongs to non-customer role: userId={}, phone={}, role={}",
+                                        user.getId(), phone, user.getRole());
+                        throw new BusinessException(ErrorCode.VALIDATION_ERROR,
+                                        "Phone number is already used by another account type");
+                }
         }
 
         private void ensureEmailAvailable(String email) {

@@ -40,13 +40,20 @@ public class SecurityConfig {
                                         auth.requestMatchers(HttpMethod.GET,
                                                         "/restaurants",
                                                         "/restaurants/*/categories",
-                                                        "/restaurants/*/menu")
+                                                        "/restaurants/*/menu",
+                                                        "/ratings/restaurants/*",
+                                                        "/ratings/restaurants/*/summary",
+                                                        "/ratings/menu-items/*",
+                                                        "/ratings/menu-items/*/summary",
+                                                        "/ratings/delivery-partners/*",
+                                                        "/ratings/delivery-partners/*/summary")
                                                         .permitAll();
                                         auth.requestMatchers(
                                                         "/auth/login",
                                                         "/auth/register",
                                                         "/auth/refresh",
                                                         "/auth/signup/**",
+                                                        "/coupons/preview",
                                                         "/orders/guest-checkout/otp",
                                                         "/orders/guest-checkout",
                                                         "/actuator/health")

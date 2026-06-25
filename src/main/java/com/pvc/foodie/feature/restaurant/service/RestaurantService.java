@@ -12,6 +12,8 @@ import com.pvc.foodie.comman.exception.ErrorCode;
 import com.pvc.foodie.feature.auth.entity.Role;
 import com.pvc.foodie.feature.auth.entity.User;
 import com.pvc.foodie.feature.notification.event.RestaurantCreatedEvent;
+import com.pvc.foodie.feature.rating.dto.RatingSummary;
+import com.pvc.foodie.feature.rating.service.RatingService;
 import com.pvc.foodie.feature.restaurant.dto.CategoryRequest;
 import com.pvc.foodie.feature.restaurant.dto.CategoryResponse;
 import com.pvc.foodie.feature.restaurant.dto.MenuItemRequest;
@@ -38,6 +40,7 @@ public class RestaurantService {
     private final CategoryRepository categoryRepository;
     private final MenuItemRepository menuItemRepository;
     private final CurrentUserService currentUserService;
+    private final RatingService ratingService;
     private final ApplicationEventPublisher eventPublisher;
 
     @Transactional(readOnly = true)
@@ -238,6 +241,7 @@ public class RestaurantService {
     }
 
     private RestaurantResponse toRestaurantResponse(Restaurant restaurant) {
+        RatingSummary summary = ratingService.getRestaurantRatingSummary(restaurant.getId());
         return new RestaurantResponse(
                 restaurant.getId(),
                 restaurant.getName(),
@@ -247,7 +251,9 @@ public class RestaurantService {
                 restaurant.getAddress(),
                 restaurant.getLatitude(),
                 restaurant.getLongitude(),
-                restaurant.isOpen());
+                restaurant.isOpen(),
+                summary.averageRating(),
+                summary.ratingCount());
     }
 
     private CategoryResponse toCategoryResponse(Category category) {
@@ -256,6 +262,7 @@ public class RestaurantService {
 
     private MenuItemResponse toMenuItemResponse(MenuItem item) {
         UUID categoryId = item.getCategory() == null ? null : item.getCategory().getId();
+        RatingSummary summary = ratingService.getMenuItemRatingSummary(item.getId());
         return new MenuItemResponse(
                 item.getId(),
                 categoryId,
@@ -265,6 +272,8 @@ public class RestaurantService {
                 item.getImageUrl(),
                 item.isVeg(),
                 item.isAvailable(),
-                item.getDisplayOrder());
+                item.getDisplayOrder(),
+                summary.averageRating(),
+                summary.ratingCount());
     }
 }

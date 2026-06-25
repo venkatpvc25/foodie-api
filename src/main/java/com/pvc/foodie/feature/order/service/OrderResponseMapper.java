@@ -9,6 +9,7 @@ import com.pvc.foodie.feature.order.dto.OrderItemResponse;
 import com.pvc.foodie.feature.order.dto.OrderResponse;
 import com.pvc.foodie.feature.order.entity.Order;
 import com.pvc.foodie.feature.order.entity.OrderItem;
+import com.pvc.foodie.feature.rating.repository.DeliveryPartnerTipRepository;
 
 import lombok.RequiredArgsConstructor;
 
@@ -17,6 +18,7 @@ import lombok.RequiredArgsConstructor;
 public class OrderResponseMapper {
 
     private final RazorpayGatewayService razorpayGatewayService;
+    private final DeliveryPartnerTipRepository deliveryPartnerTipRepository;
 
     public OrderResponse toResponse(Order order) {
         UUID deliveryPartnerId = order.getDeliveryPartner() == null ? null : order.getDeliveryPartner().getId();
@@ -35,6 +37,8 @@ public class OrderResponseMapper {
                 order.getSubtotal(),
                 order.getDeliveryCharge(),
                 order.getTax(),
+                order.getDiscountAmount(),
+                order.getCouponCode(),
                 order.getTotal(),
                 order.getPaymentMethod(),
                 order.getPaymentStatus(),
@@ -42,6 +46,7 @@ public class OrderResponseMapper {
                 order.getRestaurantPayoutAmount(),
                 order.getPlatformCommissionAmount(),
                 deliveryPartnerEarningAmount(order),
+                deliveryPartnerTipAmount(order),
                 order.getDeliveryPartnerPayoutAmount(),
                 order.getDeliveryPartnerRazorpayTransferId(),
                 order.getNotes(),
@@ -49,7 +54,14 @@ public class OrderResponseMapper {
     }
 
     private BigDecimal deliveryPartnerEarningAmount(Order order) {
-        return order.getDeliveryPartner() == null ? BigDecimal.ZERO : order.getDeliveryCharge();
+        return order.getDeliveryPartner() == null
+                ? BigDecimal.ZERO
+                : order.getDeliveryCharge().add(deliveryPartnerTipAmount(order));
+    }
+
+    private BigDecimal deliveryPartnerTipAmount(Order order) {
+        BigDecimal tipAmount = deliveryPartnerTipRepository.sumAmountByOrderId(order.getId());
+        return tipAmount == null ? BigDecimal.ZERO : tipAmount;
     }
 
     private OrderItemResponse toItemResponse(OrderItem item) {

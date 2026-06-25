@@ -31,11 +31,7 @@ public class GuestCheckoutOtpService {
 
     public GuestCheckoutOtpResponse requestOtp(String phone) {
         String normalizedPhone = normalize(phone);
-        if (!rateLimitService.allow("otp-phone:" + normalizedPhone, rateLimitProperties.getOtpPhone())) {
-            log.warn("Guest checkout OTP phone rate limit exceeded: phone={}", normalizedPhone);
-            throw new BusinessException(ErrorCode.RATE_LIMIT_EXCEEDED,
-                    "Too many OTP requests. Please try again later.");
-        }
+        requireOtpRequestAllowed(normalizedPhone);
         String code = String.valueOf(100000 + RANDOM.nextInt(900000));
         Instant expiresAt = Instant.now().plusSeconds(properties.getTtlSeconds());
         challenges.put(normalizedPhone, new OtpChallenge(code, expiresAt, 0));
@@ -48,23 +44,47 @@ public class GuestCheckoutOtpService {
     public void verify(String phone, String code) {
         String normalizedPhone = normalize(phone);
         OtpChallenge challenge = challenges.get(normalizedPhone);
-        if (challenge == null) {
-            throw invalidOtp("Verification code is required");
-        }
-        if (challenge.expiresAt().isBefore(Instant.now())) {
-            challenges.remove(normalizedPhone);
-            throw invalidOtp("Verification code expired");
-        }
-        if (challenge.attempts() >= properties.getMaxAttempts()) {
-            challenges.remove(normalizedPhone);
-            throw invalidOtp("Too many verification attempts");
-        }
-        if (!challenge.code().equals(code)) {
+        requireChallengePresent(challenge);
+        requireChallengeActive(normalizedPhone, challenge);
+        requireAttemptsAvailable(normalizedPhone, challenge);
+        if (!isMatchingCode(challenge, code)) {
             challenges.put(normalizedPhone, challenge.nextAttempt());
             throw invalidOtp("Invalid verification code");
         }
         challenges.remove(normalizedPhone);
         log.info("Guest checkout OTP verified: phone={}", normalizedPhone);
+    }
+
+    private void requireOtpRequestAllowed(String normalizedPhone) {
+        if (!rateLimitService.allow("otp-phone:" + normalizedPhone, rateLimitProperties.getOtpPhone())) {
+            log.warn("Guest checkout OTP phone rate limit exceeded: phone={}", normalizedPhone);
+            throw new BusinessException(ErrorCode.RATE_LIMIT_EXCEEDED,
+                    "Too many OTP requests. Please try again later.");
+        }
+    }
+
+    private void requireChallengePresent(OtpChallenge challenge) {
+        if (challenge == null) {
+            throw invalidOtp("Verification code is required");
+        }
+    }
+
+    private void requireChallengeActive(String normalizedPhone, OtpChallenge challenge) {
+        if (challenge.expiresAt().isBefore(Instant.now())) {
+            challenges.remove(normalizedPhone);
+            throw invalidOtp("Verification code expired");
+        }
+    }
+
+    private void requireAttemptsAvailable(String normalizedPhone, OtpChallenge challenge) {
+        if (challenge.attempts() >= properties.getMaxAttempts()) {
+            challenges.remove(normalizedPhone);
+            throw invalidOtp("Too many verification attempts");
+        }
+    }
+
+    private boolean isMatchingCode(OtpChallenge challenge, String code) {
+        return challenge.code().equals(code);
     }
 
     private BusinessException invalidOtp(String message) {

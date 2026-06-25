@@ -17,5 +17,6 @@ public record GuestCheckoutRequest(
                 @NotBlank @Size(min = 6, max = 6) String verificationCode,
                 @Valid @NotNull AddressRequest address,
                 @Valid @NotEmpty List<CartItemRequest> items,
+                @Size(max = 80) String couponCode,
                 @Size(max = 1000) String notes) {
 }

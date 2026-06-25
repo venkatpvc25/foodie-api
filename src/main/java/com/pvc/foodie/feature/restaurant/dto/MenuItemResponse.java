@@ -12,5 +12,7 @@ public record MenuItemResponse(
                 String imageUrl,
                 boolean veg,
                 boolean available,
-                int displayOrder) {
+                int displayOrder,
+                double averageRating,
+                long ratingCount) {
 }

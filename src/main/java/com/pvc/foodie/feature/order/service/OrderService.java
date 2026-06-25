@@ -20,6 +20,8 @@ import com.pvc.foodie.feature.auth.entity.User;
 import com.pvc.foodie.feature.cart.entity.Cart;
 import com.pvc.foodie.feature.cart.repository.CartRepository;
 import com.pvc.foodie.feature.auth.service.AuthService;
+import com.pvc.foodie.feature.coupon.dto.AppliedCoupon;
+import com.pvc.foodie.feature.coupon.service.CouponService;
 import com.pvc.foodie.feature.notification.event.DeliveryOrderClaimedEvent;
 import com.pvc.foodie.feature.notification.event.OrderPlacedEvent;
 import com.pvc.foodie.feature.notification.event.OrderStatusChangedEvent;
@@ -34,6 +36,7 @@ import com.pvc.foodie.feature.order.entity.OrderStatus;
 import com.pvc.foodie.feature.order.entity.PaymentMethod;
 import com.pvc.foodie.feature.order.entity.PaymentStatus;
 import com.pvc.foodie.feature.order.repository.OrderRepository;
+import com.pvc.foodie.feature.rating.service.RatingService;
 import com.pvc.foodie.feature.restaurant.entity.MenuItem;
 import com.pvc.foodie.feature.restaurant.entity.Restaurant;
 import com.pvc.foodie.feature.restaurant.repository.MenuItemRepository;
@@ -59,6 +62,8 @@ public class OrderService {
     private final RazorpayPaymentService razorpayPaymentService;
     private final OrderResponseMapper orderResponseMapper;
     private final DeliveryPayoutService deliveryPayoutService;
+    private final RatingService ratingService;
+    private final CouponService couponService;
     private final ApplicationEventPublisher eventPublisher;
     private final GuestCheckoutOtpService guestCheckoutOtpService;
 
@@ -68,11 +73,7 @@ public class OrderService {
         requireRole(user, Role.CUSTOMER, "Customer access required");
         Cart cart = cartRepository.findByUserId(user.getId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.VALIDATION_ERROR, "Cart is empty"));
-        if (cart.getItems().isEmpty() || cart.getRestaurant() == null) {
-            log.warn("Order placement rejected because cart is empty: userId={}, cartId={}",
-                    user.getId(), cart.getId());
-            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Cart is empty");
-        }
+        requireOrderableCart(user, cart);
 
         Address address = addressRepository.findByIdAndUserId(request.addressId(), user.getId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "Address not found"));
@@ -80,8 +81,7 @@ public class OrderService {
         BigDecimal subtotal = cart.getItems().stream()
                 .map(item -> item.getPrice().multiply(BigDecimal.valueOf(item.getQuantity())))
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal tax = subtotal.multiply(TAX_RATE);
-        BigDecimal total = subtotal.add(DELIVERY_CHARGE).add(tax);
+        PricingSummary pricing = priceOrder(request.couponCode(), cart.getRestaurant().getId(), subtotal);
 
         Order order = new Order();
         order.setOrderNumber("ORD-" + Instant.now().toEpochMilli());
@@ -91,8 +91,7 @@ public class OrderService {
         order.setStatus(OrderStatus.PLACED);
         order.setSubtotal(subtotal);
         order.setDeliveryCharge(DELIVERY_CHARGE);
-        order.setTax(tax);
-        order.setTotal(total);
+        applyPricing(order, pricing);
         order.setPaymentMethod(PaymentMethod.ONLINE);
         order.setPaymentStatus(PaymentStatus.PENDING);
         order.setNotes(request.notes());
@@ -108,12 +107,14 @@ public class OrderService {
         });
 
         Order saved = orderRepository.save(order);
+        couponService.markCouponUsed(pricing.appliedCoupon().coupon());
         razorpayPaymentService.createOnlinePaymentOrderIfRequired(saved);
         cart.getItems().clear();
         cart.setRestaurant(null);
-        log.info("Order placed: userId={}, orderId={}, orderNumber={}, restaurantId={}, itemCount={}, subtotal={}, tax={}, deliveryCharge={}, total={}",
+        log.info("Order placed: userId={}, orderId={}, orderNumber={}, restaurantId={}, itemCount={}, subtotal={}, discount={}, tax={}, deliveryCharge={}, total={}",
                 user.getId(), saved.getId(), saved.getOrderNumber(), saved.getRestaurant().getId(),
-                saved.getItems().size(), saved.getSubtotal(), saved.getTax(), saved.getDeliveryCharge(), saved.getTotal());
+                saved.getItems().size(), saved.getSubtotal(), saved.getDiscountAmount(), saved.getTax(),
+                saved.getDeliveryCharge(), saved.getTotal());
         eventPublisher.publishEvent(new OrderPlacedEvent(saved));
         return orderResponseMapper.toResponse(saved);
     }
@@ -143,20 +144,13 @@ public class OrderService {
             MenuItem menuItem = menuItemRepository.findByIdAndAvailableTrue(cartItem.menuItemId())
                     .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "Menu item not found"));
 
-            if (!menuItem.getRestaurant().isOpen()) {
-                log.warn("Guest checkout rejected, restaurant is closed: phone={}, restaurantId={}",
-                        request.phone(), menuItem.getRestaurant().getId());
-                throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Restaurant is closed");
-            }
+            requireRestaurantOpenForGuestCheckout(request.phone(), menuItem);
 
             if (restaurant == null) {
                 restaurant = menuItem.getRestaurant();
                 order.setRestaurant(restaurant);
-            } else if (!restaurant.getId().equals(menuItem.getRestaurant().getId())) {
-                log.warn("Guest checkout rejected, items from multiple restaurants: phone={}, firstRestaurantId={}, otherRestaurantId={}",
-                        request.phone(), restaurant.getId(), menuItem.getRestaurant().getId());
-                throw new BusinessException(ErrorCode.VALIDATION_ERROR,
-                        "All items in an order must be from the same restaurant");
+            } else {
+                requireSameRestaurantForGuestCheckout(request.phone(), restaurant, menuItem);
             }
 
             BigDecimal lineTotal = menuItem.getPrice().multiply(BigDecimal.valueOf(cartItem.quantity()));
@@ -171,14 +165,13 @@ public class OrderService {
             order.getItems().add(orderItem);
         }
 
-        BigDecimal tax = subtotal.multiply(TAX_RATE);
-        BigDecimal total = subtotal.add(DELIVERY_CHARGE).add(tax);
+        PricingSummary pricing = priceOrder(request.couponCode(), restaurant.getId(), subtotal);
         order.setSubtotal(subtotal);
         order.setDeliveryCharge(DELIVERY_CHARGE);
-        order.setTax(tax);
-        order.setTotal(total);
+        applyPricing(order, pricing);
 
         Order saved = orderRepository.save(order);
+        couponService.markCouponUsed(pricing.appliedCoupon().coupon());
         razorpayPaymentService.createOnlinePaymentOrderIfRequired(saved);
         AuthResponse auth = authService.issueTokens(user);
         log.info("Guest order placed: phone={}, userId={}, orderId={}, orderNumber={}, restaurantId={}, itemCount={}, total={}",
@@ -215,11 +208,7 @@ public class OrderService {
         requireRole(user, Role.CUSTOMER, "Customer access required");
         Order order = orderRepository.findByIdAndUserId(id, user.getId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "Order not found"));
-        if (order.getStatus() != OrderStatus.PLACED && order.getStatus() != OrderStatus.ACCEPTED) {
-            log.warn("Order cancellation rejected: userId={}, orderId={}, currentStatus={}",
-                    user.getId(), id, order.getStatus());
-            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Order cannot be cancelled");
-        }
+        requireCustomerCancellableOrder(user, id, order);
         OrderStatus oldStatus = order.getStatus();
         order.setStatus(OrderStatus.CANCELLED);
         log.info("Order cancelled by customer: userId={}, orderId={}", user.getId(), id);
@@ -244,23 +233,7 @@ public class OrderService {
         requireRole(user, Role.RESTAURANT, "Restaurant access required");
         Order order = orderRepository.findByIdAndRestaurantCreatedById(id, user.getId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "Order not found"));
-        if (!List.of(OrderStatus.ACCEPTED, OrderStatus.PREPARING, OrderStatus.READY, OrderStatus.CANCELLED)
-                .contains(status)) {
-            log.warn("Restaurant status update rejected due to invalid target: restaurantUserId={}, orderId={}, requestedStatus={}",
-                    user.getId(), id, status);
-            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Invalid restaurant order status");
-        }
-        if (order.getStatus() == OrderStatus.CANCELLED || order.getStatus() == OrderStatus.DELIVERED) {
-            log.warn("Restaurant status update rejected because order is closed: restaurantUserId={}, orderId={}, currentStatus={}, requestedStatus={}",
-                    user.getId(), id, order.getStatus(), status);
-            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Order status cannot be changed");
-        }
-        if (status == OrderStatus.CANCELLED && order.getStatus() != OrderStatus.PLACED
-                && order.getStatus() != OrderStatus.ACCEPTED) {
-            log.warn("Restaurant cancellation rejected: restaurantUserId={}, orderId={}, currentStatus={}",
-                    user.getId(), id, order.getStatus());
-            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Order cannot be cancelled by restaurant");
-        }
+        requireValidRestaurantStatusUpdate(user, id, order, status);
         OrderStatus oldStatus = order.getStatus();
         order.setStatus(status);
         log.info("Restaurant order status updated: restaurantUserId={}, orderId={}, oldStatus={}, newStatus={}",
@@ -312,12 +285,16 @@ public class OrderService {
                 .filter(order -> order.getStatus() == OrderStatus.DELIVERED)
                 .map(Order::getDeliveryCharge)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
-        log.info("Delivery dashboard fetched: deliveryPartnerId={}, activeOrderCount={}, deliveredOrderCount={}, totalEarnings={}",
-                user.getId(), activeOrders.size(), deliveredOrders.size(), totalEarnings);
+        BigDecimal totalTips = ratingService.getDeliveryPartnerTipTotal(user.getId());
+        BigDecimal totalEarningsWithTips = totalEarnings.add(totalTips);
+        log.info("Delivery dashboard fetched: deliveryPartnerId={}, activeOrderCount={}, deliveredOrderCount={}, totalEarnings={}, totalTips={}",
+                user.getId(), activeOrders.size(), deliveredOrders.size(), totalEarnings, totalTips);
         return new DeliveryDashboardResponse(
                 activeOrders.size(),
                 deliveredOrders.size(),
                 totalEarnings,
+                totalTips,
+                totalEarningsWithTips,
                 activeOrders,
                 deliveredOrders);
     }
@@ -328,15 +305,7 @@ public class OrderService {
         requireRole(user, Role.DELIVERY_PARTNER, "Delivery partner access required");
         Order order = orderRepository.findById(id)
                 .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "Order not found"));
-        if (order.getStatus() != OrderStatus.READY || order.getDeliveryPartner() != null) {
-            UUID assignedDeliveryPartnerId = order.getDeliveryPartner() == null ? null : order.getDeliveryPartner().getId();
-            log.warn("Delivery claim rejected: deliveryPartnerId={}, orderId={}, currentStatus={}, assignedDeliveryPartnerId={}",
-                    user.getId(), id, order.getStatus(), assignedDeliveryPartnerId);
-            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Order is not available for delivery");
-        }
-        if (order.getPaymentStatus() != PaymentStatus.PAID) {
-            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Online payment must be completed before delivery");
-        }
+        requireClaimableDeliveryOrder(user, id, order);
         order.setDeliveryPartner(user);
         log.info("Delivery order claimed: deliveryPartnerId={}, orderId={}", user.getId(), id);
         eventPublisher.publishEvent(new DeliveryOrderClaimedEvent(order));
@@ -349,12 +318,7 @@ public class OrderService {
         requireRole(user, Role.DELIVERY_PARTNER, "Delivery partner access required");
         Order order = orderRepository.findByIdAndDeliveryPartnerId(id, user.getId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "Order not found"));
-        if (order.getStatus() != OrderStatus.READY) {
-            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Order is not ready for pickup");
-        }
-        if (order.getPaymentStatus() != PaymentStatus.PAID) {
-            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Online payment must be completed before pickup");
-        }
+        requirePickupReadyOrder(order);
         OrderStatus oldStatus = order.getStatus();
         order.setStatus(OrderStatus.PICKED_UP);
         log.info("Delivery order picked up: deliveryPartnerId={}, orderId={}", user.getId(), id);
@@ -368,12 +332,7 @@ public class OrderService {
         requireRole(user, Role.DELIVERY_PARTNER, "Delivery partner access required");
         Order order = orderRepository.findByIdAndDeliveryPartnerId(id, user.getId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "Order not found"));
-        if (order.getStatus() != OrderStatus.PICKED_UP && order.getStatus() != OrderStatus.OUT_FOR_DELIVERY) {
-            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Order must be picked up before delivery");
-        }
-        if (order.getPaymentStatus() != PaymentStatus.PAID) {
-            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Online payment must be completed before delivery");
-        }
+        requireDeliverableOrder(order);
         OrderStatus oldStatus = order.getStatus();
         order.setStatus(OrderStatus.DELIVERED);
         deliveryPayoutService.transferDeliveryChargeIfDelivered(order);
@@ -388,27 +347,9 @@ public class OrderService {
         requireRole(user, Role.DELIVERY_PARTNER, "Delivery partner access required");
         Order order = orderRepository.findByIdAndDeliveryPartnerId(id, user.getId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "Order not found"));
-        if (!List.of(OrderStatus.PICKED_UP, OrderStatus.OUT_FOR_DELIVERY, OrderStatus.DELIVERED).contains(status)) {
-            log.warn("Delivery status update rejected due to invalid target: deliveryPartnerId={}, orderId={}, requestedStatus={}",
-                    user.getId(), id, status);
-            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Invalid delivery order status");
-        }
-        if (order.getStatus() == OrderStatus.DELIVERED || order.getStatus() == OrderStatus.CANCELLED) {
-            log.warn("Delivery status update rejected because order is closed: deliveryPartnerId={}, orderId={}, currentStatus={}, requestedStatus={}",
-                    user.getId(), id, order.getStatus(), status);
-            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Order status cannot be changed");
-        }
+        requireValidDeliveryStatusUpdate(user, id, order, status);
         OrderStatus oldStatus = order.getStatus();
-        if (status == OrderStatus.DELIVERED && order.getPaymentStatus() != PaymentStatus.PAID) {
-            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Online payment must be completed before delivery");
-        }
-        if (status == OrderStatus.PICKED_UP && order.getStatus() != OrderStatus.READY) {
-            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Order is not ready for pickup");
-        }
-        if (status == OrderStatus.DELIVERED && order.getStatus() != OrderStatus.PICKED_UP
-                && order.getStatus() != OrderStatus.OUT_FOR_DELIVERY) {
-            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Order must be picked up before delivery");
-        }
+        requireDeliveryStatusTransition(order, status);
         order.setStatus(status);
         deliveryPayoutService.transferDeliveryChargeIfDelivered(order);
         log.info("Delivery order status updated: deliveryPartnerId={}, orderId={}, oldStatus={}, newStatus={}, paymentStatus={}",
@@ -434,10 +375,149 @@ public class OrderService {
         return saved;
     }
 
+    private PricingSummary priceOrder(String couponCode, UUID restaurantId, BigDecimal subtotal) {
+        AppliedCoupon appliedCoupon = couponService.validateAndCalculate(couponCode, restaurantId, subtotal);
+        BigDecimal discountedSubtotal = subtotal.subtract(appliedCoupon.discountAmount());
+        BigDecimal tax = discountedSubtotal.multiply(TAX_RATE);
+        BigDecimal total = discountedSubtotal.add(DELIVERY_CHARGE).add(tax);
+        return new PricingSummary(appliedCoupon, tax, total);
+    }
+
+    private void applyPricing(Order order, PricingSummary pricing) {
+        order.setCoupon(pricing.appliedCoupon().coupon());
+        order.setCouponCode(pricing.appliedCoupon().code());
+        order.setDiscountAmount(pricing.appliedCoupon().discountAmount());
+        order.setTax(pricing.tax());
+        order.setTotal(pricing.total());
+    }
+
+    private void requireOrderableCart(User user, Cart cart) {
+        if (cart.getItems().isEmpty() || cart.getRestaurant() == null) {
+            log.warn("Order placement rejected because cart is empty: userId={}, cartId={}",
+                    user.getId(), cart.getId());
+            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Cart is empty");
+        }
+    }
+
+    private void requireRestaurantOpenForGuestCheckout(String phone, MenuItem menuItem) {
+        if (!menuItem.getRestaurant().isOpen()) {
+            log.warn("Guest checkout rejected, restaurant is closed: phone={}, restaurantId={}",
+                    phone, menuItem.getRestaurant().getId());
+            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Restaurant is closed");
+        }
+    }
+
+    private void requireSameRestaurantForGuestCheckout(String phone, Restaurant restaurant, MenuItem menuItem) {
+        if (!restaurant.getId().equals(menuItem.getRestaurant().getId())) {
+            log.warn("Guest checkout rejected, items from multiple restaurants: phone={}, firstRestaurantId={}, otherRestaurantId={}",
+                    phone, restaurant.getId(), menuItem.getRestaurant().getId());
+            throw new BusinessException(ErrorCode.VALIDATION_ERROR,
+                    "All items in an order must be from the same restaurant");
+        }
+    }
+
+    private void requireCustomerCancellableOrder(User user, UUID orderId, Order order) {
+        if (order.getStatus() != OrderStatus.PLACED && order.getStatus() != OrderStatus.ACCEPTED) {
+            log.warn("Order cancellation rejected: userId={}, orderId={}, currentStatus={}",
+                    user.getId(), orderId, order.getStatus());
+            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Order cannot be cancelled");
+        }
+    }
+
+    private void requireValidRestaurantStatusUpdate(User user, UUID orderId, Order order, OrderStatus status) {
+        requireRestaurantTargetStatus(user, orderId, status);
+        requireRestaurantOrderOpenForUpdate(user, orderId, order, status);
+        requireRestaurantCancellationAllowed(user, orderId, order, status);
+    }
+
+    private void requireRestaurantTargetStatus(User user, UUID orderId, OrderStatus status) {
+        if (!List.of(OrderStatus.ACCEPTED, OrderStatus.PREPARING, OrderStatus.READY, OrderStatus.CANCELLED)
+                .contains(status)) {
+            log.warn("Restaurant status update rejected due to invalid target: restaurantUserId={}, orderId={}, requestedStatus={}",
+                    user.getId(), orderId, status);
+            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Invalid restaurant order status");
+        }
+    }
+
+    private void requireRestaurantOrderOpenForUpdate(User user, UUID orderId, Order order, OrderStatus status) {
+        if (order.getStatus() == OrderStatus.CANCELLED || order.getStatus() == OrderStatus.DELIVERED) {
+            log.warn("Restaurant status update rejected because order is closed: restaurantUserId={}, orderId={}, currentStatus={}, requestedStatus={}",
+                    user.getId(), orderId, order.getStatus(), status);
+            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Order status cannot be changed");
+        }
+    }
+
+    private void requireRestaurantCancellationAllowed(User user, UUID orderId, Order order, OrderStatus status) {
+        if (status == OrderStatus.CANCELLED && order.getStatus() != OrderStatus.PLACED
+                && order.getStatus() != OrderStatus.ACCEPTED) {
+            log.warn("Restaurant cancellation rejected: restaurantUserId={}, orderId={}, currentStatus={}",
+                    user.getId(), orderId, order.getStatus());
+            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Order cannot be cancelled by restaurant");
+        }
+    }
+
+    private void requireClaimableDeliveryOrder(User user, UUID orderId, Order order) {
+        if (order.getStatus() != OrderStatus.READY || order.getDeliveryPartner() != null) {
+            UUID assignedDeliveryPartnerId = order.getDeliveryPartner() == null ? null : order.getDeliveryPartner().getId();
+            log.warn("Delivery claim rejected: deliveryPartnerId={}, orderId={}, currentStatus={}, assignedDeliveryPartnerId={}",
+                    user.getId(), orderId, order.getStatus(), assignedDeliveryPartnerId);
+            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Order is not available for delivery");
+        }
+        requirePaidOrder(order, "Online payment must be completed before delivery");
+    }
+
+    private void requirePickupReadyOrder(Order order) {
+        if (order.getStatus() != OrderStatus.READY) {
+            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Order is not ready for pickup");
+        }
+        requirePaidOrder(order, "Online payment must be completed before pickup");
+    }
+
+    private void requireDeliverableOrder(Order order) {
+        if (order.getStatus() != OrderStatus.PICKED_UP && order.getStatus() != OrderStatus.OUT_FOR_DELIVERY) {
+            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Order must be picked up before delivery");
+        }
+        requirePaidOrder(order, "Online payment must be completed before delivery");
+    }
+
+    private void requireValidDeliveryStatusUpdate(User user, UUID orderId, Order order, OrderStatus status) {
+        if (!List.of(OrderStatus.PICKED_UP, OrderStatus.OUT_FOR_DELIVERY, OrderStatus.DELIVERED).contains(status)) {
+            log.warn("Delivery status update rejected due to invalid target: deliveryPartnerId={}, orderId={}, requestedStatus={}",
+                    user.getId(), orderId, status);
+            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Invalid delivery order status");
+        }
+        if (order.getStatus() == OrderStatus.DELIVERED || order.getStatus() == OrderStatus.CANCELLED) {
+            log.warn("Delivery status update rejected because order is closed: deliveryPartnerId={}, orderId={}, currentStatus={}, requestedStatus={}",
+                    user.getId(), orderId, order.getStatus(), status);
+            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Order status cannot be changed");
+        }
+    }
+
+    private void requireDeliveryStatusTransition(Order order, OrderStatus status) {
+        if (status == OrderStatus.PICKED_UP) {
+            requirePickupReadyOrder(order);
+        }
+        if (status == OrderStatus.DELIVERED) {
+            requireDeliverableOrder(order);
+        }
+    }
+
+    private void requirePaidOrder(Order order, String message) {
+        if (order.getPaymentStatus() != PaymentStatus.PAID) {
+            throw new BusinessException(ErrorCode.VALIDATION_ERROR, message);
+        }
+    }
+
     private void requireRole(User user, Role role, String message) {
         if (user.getRole() != role && user.getRole() != Role.ADMIN) {
             log.warn("Order access denied: userId={}, role={}, requiredRole={}", user.getId(), user.getRole(), role);
             throw new BusinessException(ErrorCode.ACCESS_DENIED, message);
         }
+    }
+
+    private record PricingSummary(
+            AppliedCoupon appliedCoupon,
+            BigDecimal tax,
+            BigDecimal total) {
     }
 }

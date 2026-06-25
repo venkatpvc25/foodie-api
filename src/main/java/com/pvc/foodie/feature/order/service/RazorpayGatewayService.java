@@ -66,7 +66,7 @@ public class RazorpayGatewayService {
     }
 
     public RazorpayCheckoutResponse checkoutResponse(Order order) {
-        if (order.getRazorpayOrderId() == null) {
+        if (!hasRazorpayOrder(order)) {
             return null;
         }
         return new RazorpayCheckoutResponse(
@@ -106,9 +106,7 @@ public class RazorpayGatewayService {
             request.put("transfers", transfers);
 
             List<Transfer> createdTransfers = client.payments.transfer(order.getRazorpayPaymentId(), request);
-            if (createdTransfers.isEmpty()) {
-                throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Razorpay delivery transfer was not created");
-            }
+            requireDeliveryTransferCreated(createdTransfers);
 
             String transferId = createdTransfers.get(0).get("id");
             log.info("Razorpay delivery transfer created: orderId={}, paymentId={}, transferId={}, deliveryPartnerAccountIdLength={}, amount={}",
@@ -133,7 +131,7 @@ public class RazorpayGatewayService {
                 transferPlan.restaurantAmount(),
                 "restaurant",
                 order));
-        if (transferPlan.adminTransferAmount() > 0) {
+        if (hasAdminTransfer(transferPlan)) {
             transfers.put(transfer(
                     transferPlan.adminAccountId(),
                     transferPlan.adminTransferAmount(),
@@ -160,17 +158,18 @@ public class RazorpayGatewayService {
 
     private void applyTransferIds(Order order, com.razorpay.Order razorpayOrder) {
         Object transfersObject = razorpayOrder.get("transfers");
-        if (!(transfersObject instanceof JSONArray transfers)) {
+        if (!hasTransferArray(transfersObject)) {
             return;
         }
+        JSONArray transfers = (JSONArray) transfersObject;
         for (int i = 0; i < transfers.length(); i++) {
             JSONObject transfer = transfers.getJSONObject(i);
             String transferId = transfer.optString("id", null);
             String recipient = transfer.optString("recipient", null);
-            if (transferId == null || recipient == null) {
+            if (!hasTransferRecipient(transferId, recipient)) {
                 continue;
             }
-            if (recipient.equals(order.getRestaurant().getRazorpayLinkedAccountId())) {
+            if (isRestaurantRecipient(order, recipient)) {
                 order.setRestaurantRazorpayTransferId(transferId);
             } else {
                 order.setAdminRazorpayTransferId(transferId);
@@ -179,9 +178,39 @@ public class RazorpayGatewayService {
     }
 
     private void ensureConfigured() {
-        if (!properties.enabled() || isBlank(properties.keyId()) || isBlank(properties.keySecret())) {
+        if (!isConfigured()) {
             throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Razorpay payments are not configured");
         }
+    }
+
+    private void requireDeliveryTransferCreated(List<Transfer> createdTransfers) {
+        if (createdTransfers.isEmpty()) {
+            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Razorpay delivery transfer was not created");
+        }
+    }
+
+    private boolean hasRazorpayOrder(Order order) {
+        return order.getRazorpayOrderId() != null;
+    }
+
+    private boolean hasAdminTransfer(RazorpayTransferPlan transferPlan) {
+        return transferPlan.adminTransferAmount() > 0;
+    }
+
+    private boolean hasTransferArray(Object transfersObject) {
+        return transfersObject instanceof JSONArray;
+    }
+
+    private boolean hasTransferRecipient(String transferId, String recipient) {
+        return transferId != null && recipient != null;
+    }
+
+    private boolean isRestaurantRecipient(Order order, String recipient) {
+        return recipient.equals(order.getRestaurant().getRazorpayLinkedAccountId());
+    }
+
+    private boolean isConfigured() {
+        return properties.enabled() && !isBlank(properties.keyId()) && !isBlank(properties.keySecret());
     }
 
     private Long toCurrencySubunits(BigDecimal amount) {

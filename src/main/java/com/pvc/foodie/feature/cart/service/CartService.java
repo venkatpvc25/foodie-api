@@ -55,12 +55,7 @@ public class CartService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "Menu item not found"));
         Cart cart = cartRepository.findByUserId(user.getId()).orElseGet(() -> createCart(user));
 
-        if (cart.getRestaurant() != null && !cart.getRestaurant().getId().equals(menuItem.getRestaurant().getId())) {
-            log.info("Cart restaurant changed, clearing existing items: userId={}, cartId={}, oldRestaurantId={}, newRestaurantId={}, oldItemCount={}",
-                    user.getId(), cart.getId(), cart.getRestaurant().getId(), menuItem.getRestaurant().getId(),
-                    cart.getItems().size());
-            cart.getItems().clear();
-        }
+        clearCartWhenRestaurantChanges(user, cart, menuItem);
 
         cart.setRestaurant(menuItem.getRestaurant());
         CartItem item = cart.getItems().stream()
@@ -129,6 +124,20 @@ public class CartService {
         cart.setUser(user);
         log.info("Cart created: userId={}", user.getId());
         return cart;
+    }
+
+    private void clearCartWhenRestaurantChanges(User user, Cart cart, MenuItem menuItem) {
+        if (!hasDifferentRestaurant(cart, menuItem)) {
+            return;
+        }
+        log.info("Cart restaurant changed, clearing existing items: userId={}, cartId={}, oldRestaurantId={}, newRestaurantId={}, oldItemCount={}",
+                user.getId(), cart.getId(), cart.getRestaurant().getId(), menuItem.getRestaurant().getId(),
+                cart.getItems().size());
+        cart.getItems().clear();
+    }
+
+    private boolean hasDifferentRestaurant(Cart cart, MenuItem menuItem) {
+        return cart.getRestaurant() != null && !cart.getRestaurant().getId().equals(menuItem.getRestaurant().getId());
     }
 
     private CartResponse toResponse(Cart cart) {

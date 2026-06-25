@@ -12,5 +12,7 @@ public record RestaurantResponse(
                 String address,
                 BigDecimal latitude,
                 BigDecimal longitude,
-                boolean open) {
+                boolean open,
+                double averageRating,
+                long ratingCount) {
 }

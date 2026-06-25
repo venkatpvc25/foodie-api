@@ -32,13 +32,13 @@ public class FirebasePushNotificationService {
 
         FirebaseMessaging firebaseMessaging = firebaseMessagingProvider.getIfAvailable();
         if (firebaseMessaging == null) {
-            log.debug("Firebase push skipped because Firebase is disabled: userId={}", user.getId());
+            log.info("Firebase push skipped because Firebase is disabled or not initialized: userId={}", user.getId());
             return;
         }
 
         List<NotificationDeviceToken> deviceTokens = deviceTokenRepository.findByUserId(user.getId());
         if (deviceTokens.isEmpty()) {
-            log.debug("Firebase push skipped because user has no device tokens: userId={}", user.getId());
+            log.info("Firebase push skipped because user has no device tokens: userId={}", user.getId());
             return;
         }
 

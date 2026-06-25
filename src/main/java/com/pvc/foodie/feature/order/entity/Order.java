@@ -7,6 +7,7 @@ import java.util.UUID;
 
 import com.pvc.foodie.feature.address.entity.Address;
 import com.pvc.foodie.feature.auth.entity.User;
+import com.pvc.foodie.feature.coupon.entity.Coupon;
 import com.pvc.foodie.feature.restaurant.entity.Restaurant;
 
 import jakarta.persistence.CascadeType;
@@ -66,8 +67,18 @@ public class Order {
     @Column(nullable = false)
     private BigDecimal tax;
 
+    @Column(name = "discount_amount", nullable = false)
+    private BigDecimal discountAmount = BigDecimal.ZERO;
+
     @Column(nullable = false)
     private BigDecimal total;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "coupon_id")
+    private Coupon coupon;
+
+    @Column(name = "coupon_code")
+    private String couponCode;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "payment_method", nullable = false)

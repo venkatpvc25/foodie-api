@@ -25,26 +25,18 @@ public class DeliveryPayoutService {
     private final ApplicationEventPublisher eventPublisher;
 
     public void transferDeliveryChargeIfDelivered(Order order) {
-        if (order.getStatus() != OrderStatus.DELIVERED) {
+        if (!isDelivered(order)) {
             return;
         }
-        if (order.getDeliveryPartnerRazorpayTransferId() != null) {
+        if (hasDeliveryPayoutTransfer(order)) {
             return;
-        }
-        if (order.getPaymentStatus() != PaymentStatus.PAID || order.getRazorpayPaymentId() == null) {
-            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Paid Razorpay payment is required for delivery payout");
         }
 
-        User deliveryPartner = order.getDeliveryPartner();
-        if (deliveryPartner == null) {
-            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Delivery partner is required for delivery payout");
-        }
+        requirePaidRazorpayPayment(order);
+        User deliveryPartner = requireDeliveryPartner(order);
 
         String accountId = normalizeAccountId(deliveryPartner.getRazorpayLinkedAccountId());
-        if (accountId == null) {
-            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Delivery partner Razorpay linked account is not configured");
-        }
-        requireValidAccountId(accountId);
+        requireConfiguredAccountId(accountId);
 
         String transferId = razorpayGatewayService.transferDeliveryCharge(order, accountId);
         order.setDeliveryPartnerPayoutAmount(order.getDeliveryCharge());
@@ -54,6 +46,29 @@ public class DeliveryPayoutService {
         eventPublisher.publishEvent(new DeliveryPayoutTransferredEvent(order));
     }
 
+    private boolean isDelivered(Order order) {
+        return order.getStatus() == OrderStatus.DELIVERED;
+    }
+
+    private boolean hasDeliveryPayoutTransfer(Order order) {
+        return order.getDeliveryPartnerRazorpayTransferId() != null;
+    }
+
+    private void requirePaidRazorpayPayment(Order order) {
+        if (order.getPaymentStatus() != PaymentStatus.PAID || order.getRazorpayPaymentId() == null) {
+            throw new BusinessException(ErrorCode.VALIDATION_ERROR,
+                    "Paid Razorpay payment is required for delivery payout");
+        }
+    }
+
+    private User requireDeliveryPartner(Order order) {
+        User deliveryPartner = order.getDeliveryPartner();
+        if (deliveryPartner == null) {
+            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Delivery partner is required for delivery payout");
+        }
+        return deliveryPartner;
+    }
+
     private String normalizeAccountId(String accountId) {
         if (accountId == null || accountId.isBlank()) {
             return null;
@@ -61,7 +76,11 @@ public class DeliveryPayoutService {
         return accountId.trim();
     }
 
-    private void requireValidAccountId(String accountId) {
+    private void requireConfiguredAccountId(String accountId) {
+        if (accountId == null) {
+            throw new BusinessException(ErrorCode.VALIDATION_ERROR,
+                    "Delivery partner Razorpay linked account is not configured");
+        }
         if (!accountId.matches(RAZORPAY_ACCOUNT_ID_PATTERN)) {
             throw new BusinessException(
                     ErrorCode.VALIDATION_ERROR,

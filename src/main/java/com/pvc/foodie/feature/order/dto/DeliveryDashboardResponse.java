@@ -7,6 +7,8 @@ public record DeliveryDashboardResponse(
         long activeOrderCount,
         long deliveredOrderCount,
         BigDecimal totalEarnings,
+        BigDecimal totalTips,
+        BigDecimal totalEarningsWithTips,
         List<OrderResponse> activeOrders,
         List<OrderResponse> deliveredOrders) {
 }
