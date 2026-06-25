@@ -10,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.pvc.foodie.comman.exception.BusinessException;
 import com.pvc.foodie.comman.exception.ErrorCode;
+import com.pvc.foodie.config.AuthProperties;
 import com.pvc.foodie.feature.auth.dto.AuthResponse;
 import com.pvc.foodie.feature.auth.dto.CurrentUserResponse;
 import com.pvc.foodie.feature.auth.dto.CustomerSignupRequest;
@@ -37,6 +38,7 @@ public class AuthService {
         private final PasswordEncoder passwordEncoder;
         private final JwtService jwtService;
         private final ApplicationEventPublisher eventPublisher;
+        private final AuthProperties authProperties;
 
         @Transactional
         public AuthResponse register(CustomerSignupRequest request) {
@@ -58,6 +60,12 @@ public class AuthService {
 
         @Transactional
         public AuthResponse signupRestaurant(CustomerSignupRequest request) {
+                if (!authProperties.isRestaurantSignupEnabled()) {
+                        log.warn("Restaurant signup rejected because self-signup is disabled: email={}",
+                                        request.getEmail());
+                        throw new BusinessException(ErrorCode.ACCESS_DENIED,
+                                        "Restaurant signup is not enabled");
+                }
                 ensureEmailAvailable(request.getEmail());
                 ensurePhoneAvailable(request.getPhone());
 
@@ -71,6 +79,12 @@ public class AuthService {
 
         @Transactional
         public AuthResponse signupDeliveryPartner(CustomerSignupRequest request) {
+                if (!authProperties.isDeliveryPartnerSignupEnabled()) {
+                        log.warn("Delivery partner signup rejected because self-signup is disabled: email={}",
+                                        request.getEmail());
+                        throw new BusinessException(ErrorCode.ACCESS_DENIED,
+                                        "Delivery partner signup is not enabled");
+                }
                 ensureEmailAvailable(request.getEmail());
                 ensurePhoneAvailable(request.getPhone());
 

@@ -14,6 +14,7 @@ import jakarta.validation.constraints.Size;
 
 public record GuestCheckoutRequest(
                 @NotBlank @Pattern(regexp = "^\\+?[0-9]{10,15}$", message = "must be a valid phone number") String phone,
+                @NotBlank @Size(min = 6, max = 6) String verificationCode,
                 @Valid @NotNull AddressRequest address,
                 @Valid @NotEmpty List<CartItemRequest> items,
                 @Size(max = 1000) String notes) {

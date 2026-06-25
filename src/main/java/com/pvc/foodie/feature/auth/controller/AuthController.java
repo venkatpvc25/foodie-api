@@ -8,6 +8,7 @@ import com.pvc.foodie.feature.auth.dto.AuthResponse;
 import com.pvc.foodie.feature.auth.dto.CurrentUserResponse;
 import com.pvc.foodie.feature.auth.dto.CustomerSignupRequest;
 import com.pvc.foodie.feature.auth.dto.LoginRequest;
+import com.pvc.foodie.feature.auth.dto.RefreshTokenRequest;
 import com.pvc.foodie.feature.auth.service.AuthService;
 
 import jakarta.validation.Valid;
@@ -47,13 +48,13 @@ public class AuthController {
     }
 
     @PostMapping("/refresh")
-    public ApiResponse<AuthResponse> refresh(@RequestParam String token) {
-        return ApiResponse.ok(service.refresh(token));
+    public ApiResponse<AuthResponse> refresh(@Valid @RequestBody RefreshTokenRequest request) {
+        return ApiResponse.ok(service.refresh(request.refreshToken()));
     }
 
     @PostMapping("/logout")
-    public ApiResponse<?> logout(@RequestParam String token) {
-        service.logout(token);
+    public ApiResponse<?> logout(@Valid @RequestBody RefreshTokenRequest request) {
+        service.logout(request.refreshToken());
         return ApiResponse.ok("Logged out successfully");
     }
 

@@ -1,6 +1,7 @@
 
 package com.pvc.foodie.config;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.*;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
@@ -24,6 +25,9 @@ public class SecurityConfig {
         private final JwtAuthenticationFilter jwtFilter;
         private final JwtAuthenticationEntryPoint entryPoint;
 
+        @Value("${app.docs.public-enabled:false}")
+        private boolean docsPublicEnabled;
+
         @Bean
         public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
                 return http
@@ -32,24 +36,30 @@ public class SecurityConfig {
                                 .csrf(csrf -> csrf.disable())
                                 .exceptionHandling(e -> e.authenticationEntryPoint(entryPoint))
                                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                                .authorizeHttpRequests(auth -> auth
-                                                .requestMatchers(HttpMethod.GET,
-                                                                "/restaurants",
-                                                                "/restaurants/*/categories",
-                                                                "/restaurants/*/menu")
-                                                .permitAll()
-                                                .requestMatchers(
-                                                                "/auth/login",
-                                                                "/auth/register",
-                                                                "/auth/refresh",
-                                                                "/auth/signup/**",
-                                                                "/orders/guest-checkout",
+                                .authorizeHttpRequests(auth -> {
+                                        auth.requestMatchers(HttpMethod.GET,
+                                                        "/restaurants",
+                                                        "/restaurants/*/categories",
+                                                        "/restaurants/*/menu")
+                                                        .permitAll();
+                                        auth.requestMatchers(
+                                                        "/auth/login",
+                                                        "/auth/register",
+                                                        "/auth/refresh",
+                                                        "/auth/signup/**",
+                                                        "/orders/guest-checkout/otp",
+                                                        "/orders/guest-checkout",
+                                                        "/actuator/health")
+                                                        .permitAll();
+                                        if (docsPublicEnabled) {
+                                                auth.requestMatchers(
                                                                 "/v3/api-docs/**",
                                                                 "/swagger-ui/**",
-                                                                "/swagger-ui.html",
-                                                                "/actuator/health")
-                                                .permitAll()
-                                                .anyRequest().authenticated())
+                                                                "/swagger-ui.html")
+                                                                .permitAll();
+                                        }
+                                        auth.anyRequest().authenticated();
+                                })
 
                                 .addFilterBefore(jwtFilter,
                                                 UsernamePasswordAuthenticationFilter.class)

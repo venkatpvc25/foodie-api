@@ -18,9 +18,12 @@ public class GlobalExceptionHandler {
         @ExceptionHandler(BusinessException.class)
         public ResponseEntity<ApiError> handleBusiness(BusinessException ex) {
                 log.warn("Business exception: code={}, message={}", ex.getErrorCode(), ex.getMessage(), ex);
+                HttpStatus status = ex.getErrorCode() == ErrorCode.RATE_LIMIT_EXCEEDED
+                                ? HttpStatus.TOO_MANY_REQUESTS
+                                : HttpStatus.BAD_REQUEST;
 
                 return ResponseEntity
-                                .badRequest()
+                                .status(status)
                                 .body(new ApiError(
                                                 false,
                                                 ex.getErrorCode().name(),

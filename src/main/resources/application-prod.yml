@@ -3,6 +3,8 @@ app:
     enabled: ${APP_ADMIN_ENABLED:false}
     email: ${APP_ADMIN_EMAIL:admin@yourapp.com}
     password: ${APP_ADMIN_PASSWORD:change-me-before-enable}
+  docs:
+    public-enabled: false
 
 
 spring:
@@ -16,3 +18,9 @@ spring:
 jwt:
   secret: ${JWT_SECRET}
   access-expiration: ${JWT_ACCESS_EXPIRATION:3600000}
+
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false

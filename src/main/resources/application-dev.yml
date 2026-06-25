@@ -1,7 +1,16 @@
 springdoc:
+  api-docs:
+    enabled: true
   swagger-ui:
-    enabled: false
+    enabled: true
 
 spring:
   datasource:
     url: jdbc:postgresql://localhost:5432/dev_db
+
+app:
+  docs:
+    public-enabled: true
+  guest-checkout:
+    otp:
+      debug-response-enabled: true

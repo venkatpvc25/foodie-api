@@ -60,6 +60,7 @@ public class OrderService {
     private final OrderResponseMapper orderResponseMapper;
     private final DeliveryPayoutService deliveryPayoutService;
     private final ApplicationEventPublisher eventPublisher;
+    private final GuestCheckoutOtpService guestCheckoutOtpService;
 
     @Transactional
     public OrderResponse placeOrder(PlaceOrderRequest request) {
@@ -121,7 +122,7 @@ public class OrderService {
     public GuestCheckoutResponse placeGuestOrder(GuestCheckoutRequest request) {
         log.info("Guest checkout started: phone={}, itemCount={}, paymentMethod={}",
                 request.phone(), request.items().size(), PaymentMethod.ONLINE);
-        log.info("SMS verification bypassed internally for testing: phone={}", request.phone());
+        guestCheckoutOtpService.verify(request.phone(), request.verificationCode());
 
         User user = authService.getOrCreateInternallyVerifiedCustomer(request.phone());
         Address address = saveCheckoutAddress(user, request.address());

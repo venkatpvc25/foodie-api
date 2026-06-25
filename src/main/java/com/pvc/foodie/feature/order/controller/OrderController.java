@@ -12,6 +12,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.pvc.foodie.comman.response.ApiResponse;
 import com.pvc.foodie.feature.order.dto.DeliveryDashboardResponse;
+import com.pvc.foodie.feature.order.dto.GuestCheckoutOtpRequest;
+import com.pvc.foodie.feature.order.dto.GuestCheckoutOtpResponse;
 import com.pvc.foodie.feature.order.dto.GuestCheckoutRequest;
 import com.pvc.foodie.feature.order.dto.GuestCheckoutResponse;
 import com.pvc.foodie.feature.order.dto.OrderResponse;
@@ -19,6 +21,7 @@ import com.pvc.foodie.feature.order.dto.PlaceOrderRequest;
 import com.pvc.foodie.feature.order.dto.UpdateOrderStatusRequest;
 import com.pvc.foodie.feature.order.dto.VerifyRazorpayPaymentRequest;
 import com.pvc.foodie.feature.order.service.OrderService;
+import com.pvc.foodie.feature.order.service.GuestCheckoutOtpService;
 import com.pvc.foodie.feature.order.service.RazorpayPaymentService;
 
 import jakarta.validation.Valid;
@@ -31,6 +34,7 @@ public class OrderController {
 
     private final OrderService orderService;
     private final RazorpayPaymentService razorpayPaymentService;
+    private final GuestCheckoutOtpService guestCheckoutOtpService;
 
     @PostMapping
     public ApiResponse<OrderResponse> placeOrder(@Valid @RequestBody PlaceOrderRequest request) {
@@ -40,6 +44,12 @@ public class OrderController {
     @PostMapping("/guest-checkout")
     public ApiResponse<GuestCheckoutResponse> placeGuestOrder(@Valid @RequestBody GuestCheckoutRequest request) {
         return ApiResponse.ok(orderService.placeGuestOrder(request));
+    }
+
+    @PostMapping("/guest-checkout/otp")
+    public ApiResponse<GuestCheckoutOtpResponse> requestGuestCheckoutOtp(
+            @Valid @RequestBody GuestCheckoutOtpRequest request) {
+        return ApiResponse.ok(guestCheckoutOtpService.requestOtp(request.phone()));
     }
 
     @GetMapping
