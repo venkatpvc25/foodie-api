@@ -1,0 +1,7 @@
+springdoc:
+  swagger-ui:
+    enabled: false
+
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/dev_db
