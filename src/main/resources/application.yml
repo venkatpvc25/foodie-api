@@ -1,8 +1,8 @@
 spring:
   datasource:
     url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/foodie}
-    username: ${DB_PASSWORD:postgres}
-    password: ${DB_USERNAME:postgres}
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:postgres}
 
   jpa:
     hibernate:
@@ -21,48 +21,62 @@ app:
     enabled: ${APP_ADMIN_ENABLED:true}
     email: ${APP_ADMIN_EMAIL:admin@yourapp.com}
     password: ${APP_ADMIN_PASSWORD:admin@123}
+
   auth:
     restaurant-signup-enabled: ${APP_RESTAURANT_SIGNUP_ENABLED:false}
     delivery-partner-signup-enabled: ${APP_DELIVERY_PARTNER_SIGNUP_ENABLED:true}
+
   cors:
     allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173}
+
   docs:
     public-enabled: ${APP_DOCS_PUBLIC_ENABLED:false}
+
   guest-checkout:
     otp:
       ttl-seconds: ${APP_GUEST_CHECKOUT_OTP_TTL_SECONDS:300}
       max-attempts: ${APP_GUEST_CHECKOUT_OTP_MAX_ATTEMPTS:5}
-      debug-response-enabled: ${APP_GUEST_CHECKOUT_OTP_DEBUG_RESPONSE_ENABLED:true}
+      debug-response-enabled: ${APP_GUEST_CHECKOUT_OTP_DEBUG_RESPONSE_ENABLED:false}
+
   rate-limit:
     enabled: ${APP_RATE_LIMIT_ENABLED:true}
+
     login:
       max-requests: ${APP_RATE_LIMIT_LOGIN_MAX_REQUESTS:10}
       window-seconds: ${APP_RATE_LIMIT_LOGIN_WINDOW_SECONDS:60}
+
     refresh:
       max-requests: ${APP_RATE_LIMIT_REFRESH_MAX_REQUESTS:30}
       window-seconds: ${APP_RATE_LIMIT_REFRESH_WINDOW_SECONDS:60}
+
     signup:
       max-requests: ${APP_RATE_LIMIT_SIGNUP_MAX_REQUESTS:5}
       window-seconds: ${APP_RATE_LIMIT_SIGNUP_WINDOW_SECONDS:3600}
+
     otp-ip:
       max-requests: ${APP_RATE_LIMIT_OTP_IP_MAX_REQUESTS:5}
       window-seconds: ${APP_RATE_LIMIT_OTP_IP_WINDOW_SECONDS:900}
+
     otp-phone:
       max-requests: ${APP_RATE_LIMIT_OTP_PHONE_MAX_REQUESTS:5}
       window-seconds: ${APP_RATE_LIMIT_OTP_PHONE_WINDOW_SECONDS:900}
+
   notifications:
     provider: ${APP_NOTIFICATIONS_PROVIDER:log}
+
     firebase:
-      enabled: ${FIREBASE_ENABLED:true}
-      service-account-path: ${FIREBASE_SERVICE_ACCOUNT_PATH:/home/venkat/git/food-order/firebase-service-account.json}
+      enabled: ${FIREBASE_ENABLED:false}
+      service-account-path: ${FIREBASE_SERVICE_ACCOUNT_PATH:}
       app-name: ${FIREBASE_APP_NAME:foodie}
+
   payments:
     commission-rate: ${APP_PAYMENT_COMMISSION_RATE:0.10}
     admin-razorpay-account-id: ${APP_ADMIN_RAZORPAY_ACCOUNT_ID:}
+
     razorpay:
-      enabled: ${RAZORPAY_ENABLED:true}
-      key-id: ${RAZORPAY_KEY_ID:rzp_test_T5MqxLWxy3k1xP}
-      key-secret: ${RAZORPAY_KEY_SECRET:bQq9xmXIUhdE3rOUIB8jGm70}
+      enabled: ${RAZORPAY_ENABLED:false}
+      key-id: ${RAZORPAY_KEY_ID:}
+      key-secret: ${RAZORPAY_KEY_SECRET:}
       currency: ${RAZORPAY_CURRENCY:INR}
 
 jwt:
@@ -74,9 +88,11 @@ management:
     web:
       exposure:
         include: health,info,metrics,prometheus
+
   endpoint:
     health:
       show-details: when_authorized
+
   health:
     db:
       enabled: true
@@ -91,6 +107,7 @@ springdoc:
   api-docs:
     enabled: ${SPRINGDOC_API_DOCS_ENABLED:true}
     path: /v3/api-docs
+
   swagger-ui:
     enabled: ${SPRINGDOC_SWAGGER_UI_ENABLED:true}
     path: /swagger-ui.html
