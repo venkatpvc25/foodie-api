@@ -3,15 +3,16 @@ app:
     enabled: ${APP_ADMIN_ENABLED:false}
     email: ${APP_ADMIN_EMAIL:admin@yourapp.com}
     password: ${APP_ADMIN_PASSWORD:change-me-before-enable}
+
   docs:
     public-enabled: false
 
-
 spring:
   datasource:
-    url: ${DB_URL}
-    username: ${DB_USER}
-    password: ${DB_PASSWORD}
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/foodie}
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:postgres}
+
   flyway:
     baseline-on-migrate: ${FLYWAY_BASELINE_ON_MIGRATE:false}
 
