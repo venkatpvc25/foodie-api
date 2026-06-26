@@ -8,8 +8,11 @@ import com.pvc.foodie.feature.auth.dto.AuthResponse;
 import com.pvc.foodie.feature.auth.dto.CurrentUserResponse;
 import com.pvc.foodie.feature.auth.dto.CustomerSignupRequest;
 import com.pvc.foodie.feature.auth.dto.LoginRequest;
+import com.pvc.foodie.feature.auth.dto.PhoneLoginOtpRequest;
+import com.pvc.foodie.feature.auth.dto.PhoneLoginRequest;
 import com.pvc.foodie.feature.auth.dto.RefreshTokenRequest;
 import com.pvc.foodie.feature.auth.service.AuthService;
+import com.pvc.foodie.feature.order.dto.GuestCheckoutOtpResponse;
 
 import jakarta.validation.Valid;
 
@@ -45,6 +48,17 @@ public class AuthController {
     @PostMapping("/login")
     public ApiResponse<AuthResponse> login(@Valid @RequestBody LoginRequest request) {
         return ApiResponse.ok(service.login(request));
+    }
+
+    @PostMapping("/login/phone/otp")
+    public ApiResponse<GuestCheckoutOtpResponse> requestPhoneLoginOtp(
+            @Valid @RequestBody PhoneLoginOtpRequest request) {
+        return ApiResponse.ok(service.requestPhoneLoginOtp(request));
+    }
+
+    @PostMapping("/login/phone")
+    public ApiResponse<AuthResponse> loginWithPhone(@Valid @RequestBody PhoneLoginRequest request) {
+        return ApiResponse.ok(service.loginWithPhone(request));
     }
 
     @PostMapping("/refresh")

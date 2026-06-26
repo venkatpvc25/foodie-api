@@ -9,15 +9,22 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.pvc.foodie.comman.exception.BusinessException;
 import com.pvc.foodie.comman.exception.ErrorCode;
+import com.pvc.foodie.feature.audit.entity.AuditAction;
+import com.pvc.foodie.feature.audit.entity.AuditEntityType;
+import com.pvc.foodie.feature.audit.service.AuditLogService;
 import com.pvc.foodie.feature.auth.entity.Role;
 import com.pvc.foodie.feature.auth.entity.User;
 import com.pvc.foodie.feature.notification.event.RestaurantCreatedEvent;
 import com.pvc.foodie.feature.rating.dto.RatingSummary;
 import com.pvc.foodie.feature.rating.service.RatingService;
+import com.pvc.foodie.feature.restaurant.dto.BulkMenuItemRequest;
+import com.pvc.foodie.feature.restaurant.dto.BulkMenuUploadRequest;
+import com.pvc.foodie.feature.restaurant.dto.BulkMenuUploadResponse;
 import com.pvc.foodie.feature.restaurant.dto.CategoryRequest;
 import com.pvc.foodie.feature.restaurant.dto.CategoryResponse;
 import com.pvc.foodie.feature.restaurant.dto.MenuItemRequest;
 import com.pvc.foodie.feature.restaurant.dto.MenuItemResponse;
+import com.pvc.foodie.feature.restaurant.dto.RestaurantCommissionRequest;
 import com.pvc.foodie.feature.restaurant.dto.RestaurantRequest;
 import com.pvc.foodie.feature.restaurant.dto.RestaurantResponse;
 import com.pvc.foodie.feature.restaurant.entity.Category;
@@ -37,6 +44,7 @@ import lombok.extern.slf4j.Slf4j;
 public class RestaurantService {
 
     private final RestaurantRepository restaurantRepository;
+    private final AuditLogService auditLogService;
     private final CategoryRepository categoryRepository;
     private final MenuItemRepository menuItemRepository;
     private final CurrentUserService currentUserService;
@@ -48,7 +56,10 @@ public class RestaurantService {
         List<Restaurant> restaurants = search == null || search.isBlank()
                 ? restaurantRepository.findAll()
                 : restaurantRepository.findByNameContainingIgnoreCase(search);
-        List<RestaurantResponse> response = restaurants.stream().map(this::toRestaurantResponse).toList();
+        List<RestaurantResponse> response = restaurants.stream()
+                .filter(restaurant -> restaurant.isApproved() && !restaurant.isSuspended() && restaurant.isOpen())
+                .map(this::toRestaurantResponse)
+                .toList();
         log.info("Restaurants fetched: searchPresent={}, count={}", search != null && !search.isBlank(),
                 response.size());
         return response;
@@ -58,6 +69,7 @@ public class RestaurantService {
     public RestaurantResponse getRestaurant(UUID id) {
         Restaurant restaurant = restaurantRepository.findById(id)
                 .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "Restaurant not found"));
+        requirePubliclyVisibleRestaurant(restaurant);
         log.info("Restaurant fetched: restaurantId={}, open={}", id, restaurant.isOpen());
         return toRestaurantResponse(restaurant);
     }
@@ -124,8 +136,20 @@ public class RestaurantService {
     }
 
     @Transactional
+    public RestaurantResponse updateRestaurantCommission(UUID id, RestaurantCommissionRequest request) {
+        User admin = requireAdminUser();
+        Restaurant restaurant = restaurantRepository.findById(id)
+                .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "Restaurant not found"));
+        restaurant.setCommissionRate(request.commissionRate());
+        log.info("Restaurant commission updated: adminId={}, restaurantId={}, commissionRate={}",
+                admin.getId(), restaurant.getId(), restaurant.getCommissionRate());
+        return toRestaurantResponse(restaurant);
+    }
+
+    @Transactional
     public CategoryResponse createCategory(UUID restaurantId, CategoryRequest request) {
         Restaurant restaurant = getOwnedRestaurant(restaurantId);
+        requireRestaurantUsableForMenuChanges(restaurant);
         Category category = new Category();
         category.setRestaurant(restaurant);
         category.setName(request.name());
@@ -138,7 +162,8 @@ public class RestaurantService {
 
     @Transactional
     public CategoryResponse updateCategory(UUID restaurantId, UUID categoryId, CategoryRequest request) {
-        getOwnedRestaurant(restaurantId);
+        Restaurant restaurant = getOwnedRestaurant(restaurantId);
+        requireRestaurantUsableForMenuChanges(restaurant);
         Category category = categoryRepository.findByIdAndRestaurantId(categoryId, restaurantId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "Category not found"));
         category.setName(request.name());
@@ -160,6 +185,7 @@ public class RestaurantService {
     @Transactional
     public MenuItemResponse createMenuItem(UUID restaurantId, MenuItemRequest request) {
         Restaurant restaurant = getOwnedRestaurant(restaurantId);
+        requireRestaurantUsableForMenuChanges(restaurant);
         MenuItem item = new MenuItem();
         item.setRestaurant(restaurant);
         applyMenuItemRequest(item, restaurantId, request);
@@ -171,8 +197,31 @@ public class RestaurantService {
     }
 
     @Transactional
+    public BulkMenuUploadResponse bulkCreateMenuItems(UUID restaurantId, BulkMenuUploadRequest request) {
+        Restaurant restaurant = getOwnedRestaurant(restaurantId);
+        requireRestaurantUsableForMenuChanges(restaurant);
+        List<MenuItem> items = request.items().stream()
+                .map(itemRequest -> toMenuItem(restaurant, itemRequest))
+                .toList();
+        List<MenuItemResponse> response = menuItemRepository.saveAll(items).stream()
+                .map(this::toMenuItemResponse)
+                .toList();
+        auditLogService.record(
+                restaurant.getCreatedBy(),
+                AuditAction.MENU_ITEMS_BULK_UPLOADED,
+                AuditEntityType.RESTAURANT,
+                restaurant.getId(),
+                restaurant.getName(),
+                "Bulk uploaded menu items count=" + response.size());
+        log.info("Menu items bulk uploaded: ownerId={}, restaurantId={}, count={}",
+                restaurant.getCreatedBy().getId(), restaurantId, response.size());
+        return new BulkMenuUploadResponse(response.size(), response);
+    }
+
+    @Transactional
     public MenuItemResponse updateMenuItem(UUID restaurantId, UUID menuItemId, MenuItemRequest request) {
-        getOwnedRestaurant(restaurantId);
+        Restaurant restaurant = getOwnedRestaurant(restaurantId);
+        requireRestaurantUsableForMenuChanges(restaurant);
         MenuItem item = menuItemRepository.findByIdAndRestaurantId(menuItemId, restaurantId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "Menu item not found"));
         applyMenuItemRequest(item, restaurantId, request);
@@ -197,6 +246,18 @@ public class RestaurantService {
         }
     }
 
+    private void requirePubliclyVisibleRestaurant(Restaurant restaurant) {
+        if (!restaurant.isApproved() || restaurant.isSuspended()) {
+            throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "Restaurant not found");
+        }
+    }
+
+    private void requireRestaurantUsableForMenuChanges(Restaurant restaurant) {
+        if (!restaurant.isApproved() || restaurant.isSuspended()) {
+            throw new BusinessException(ErrorCode.ACCESS_DENIED, "Restaurant is not active for menu changes");
+        }
+    }
+
     private Restaurant getOwnedRestaurant(UUID restaurantId) {
         User owner = requireRestaurantUser();
         return restaurantRepository.findByIdAndCreatedById(restaurantId, owner.getId())
@@ -208,6 +269,15 @@ public class RestaurantService {
         if (user.getRole() != Role.RESTAURANT && user.getRole() != Role.ADMIN) {
             log.warn("Restaurant access denied: userId={}, role={}", user.getId(), user.getRole());
             throw new BusinessException(ErrorCode.ACCESS_DENIED, "Restaurant access required");
+        }
+        return user;
+    }
+
+    private User requireAdminUser() {
+        User user = currentUserService.getCurrentUser();
+        if (user.getRole() != Role.ADMIN) {
+            log.warn("Admin restaurant access denied: userId={}, role={}", user.getId(), user.getRole());
+            throw new BusinessException(ErrorCode.ACCESS_DENIED, "Admin access required");
         }
         return user;
     }
@@ -240,6 +310,40 @@ public class RestaurantService {
         item.setDisplayOrder(request.displayOrder());
     }
 
+    private MenuItem toMenuItem(Restaurant restaurant, BulkMenuItemRequest request) {
+        MenuItem item = new MenuItem();
+        item.setRestaurant(restaurant);
+        item.setCategory(resolveBulkCategory(restaurant, request));
+        item.setName(request.name());
+        item.setDescription(request.description());
+        item.setPrice(request.price());
+        item.setImageUrl(request.imageUrl());
+        item.setVeg(request.veg());
+        item.setAvailable(request.available() == null || request.available());
+        item.setDisplayOrder(request.displayOrder() == null ? 0 : request.displayOrder());
+        return item;
+    }
+
+    private Category resolveBulkCategory(Restaurant restaurant, BulkMenuItemRequest request) {
+        if (request.categoryId() != null) {
+            return categoryRepository.findByIdAndRestaurantId(request.categoryId(), restaurant.getId())
+                    .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "Category not found"));
+        }
+        if (request.categoryName() == null || request.categoryName().isBlank()) {
+            return null;
+        }
+        return categoryRepository.findByRestaurantIdAndNameIgnoreCase(restaurant.getId(), request.categoryName().trim())
+                .orElseGet(() -> createBulkCategory(restaurant, request.categoryName().trim()));
+    }
+
+    private Category createBulkCategory(Restaurant restaurant, String name) {
+        Category category = new Category();
+        category.setRestaurant(restaurant);
+        category.setName(name);
+        category.setDisplayOrder(0);
+        return categoryRepository.save(category);
+    }
+
     private RestaurantResponse toRestaurantResponse(Restaurant restaurant) {
         RatingSummary summary = ratingService.getRestaurantRatingSummary(restaurant.getId());
         return new RestaurantResponse(
@@ -252,6 +356,7 @@ public class RestaurantService {
                 restaurant.getLatitude(),
                 restaurant.getLongitude(),
                 restaurant.isOpen(),
+                restaurant.getCommissionRate(),
                 summary.averageRating(),
                 summary.ratingCount());
     }

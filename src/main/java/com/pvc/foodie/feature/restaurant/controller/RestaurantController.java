@@ -6,6 +6,7 @@ import java.util.UUID;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -14,10 +15,13 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.pvc.foodie.comman.response.ApiResponse;
+import com.pvc.foodie.feature.restaurant.dto.BulkMenuUploadRequest;
+import com.pvc.foodie.feature.restaurant.dto.BulkMenuUploadResponse;
 import com.pvc.foodie.feature.restaurant.dto.CategoryRequest;
 import com.pvc.foodie.feature.restaurant.dto.CategoryResponse;
 import com.pvc.foodie.feature.restaurant.dto.MenuItemRequest;
 import com.pvc.foodie.feature.restaurant.dto.MenuItemResponse;
+import com.pvc.foodie.feature.restaurant.dto.RestaurantCommissionRequest;
 import com.pvc.foodie.feature.restaurant.dto.RestaurantRequest;
 import com.pvc.foodie.feature.restaurant.dto.RestaurantResponse;
 import com.pvc.foodie.feature.restaurant.service.RestaurantService;
@@ -65,6 +69,13 @@ public class RestaurantController {
         return ApiResponse.ok("Restaurant deleted successfully");
     }
 
+    @PatchMapping("/{id}/commission")
+    public ApiResponse<RestaurantResponse> updateRestaurantCommission(
+            @PathVariable UUID id,
+            @Valid @RequestBody RestaurantCommissionRequest request) {
+        return ApiResponse.ok(restaurantService.updateRestaurantCommission(id, request));
+    }
+
     @GetMapping("/{id}/categories")
     public ApiResponse<List<CategoryResponse>> getCategories(@PathVariable UUID id) {
         return ApiResponse.ok(restaurantService.getCategories(id));
@@ -103,6 +114,13 @@ public class RestaurantController {
             @PathVariable UUID id,
             @Valid @RequestBody MenuItemRequest request) {
         return ApiResponse.ok(restaurantService.createMenuItem(id, request));
+    }
+
+    @PostMapping("/{id}/menu/bulk")
+    public ApiResponse<BulkMenuUploadResponse> bulkCreateMenuItems(
+            @PathVariable UUID id,
+            @Valid @RequestBody BulkMenuUploadRequest request) {
+        return ApiResponse.ok(restaurantService.bulkCreateMenuItems(id, request));
     }
 
     @PutMapping("/{id}/menu/{menuItemId}")

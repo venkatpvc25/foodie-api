@@ -26,7 +26,7 @@ public class RazorpaySplitPaymentService {
     private final RestaurantRepository restaurantRepository;
 
     public RazorpayTransferPlan planTransfers(Order order) {
-        BigDecimal commissionRate = paymentProperties.commissionRate();
+        BigDecimal commissionRate = commissionRateFor(order);
         requireValidCommissionRate(commissionRate);
 
         String restaurantAccountId = restaurantRepository.findRazorpayLinkedAccountIdById(order.getRestaurant().getId())
@@ -70,6 +70,11 @@ public class RazorpaySplitPaymentService {
         return amount.multiply(BigDecimal.valueOf(100))
                 .setScale(0, RoundingMode.HALF_UP)
                 .longValueExact();
+    }
+
+    private BigDecimal commissionRateFor(Order order) {
+        BigDecimal restaurantCommissionRate = order.getRestaurant().getCommissionRate();
+        return restaurantCommissionRate == null ? paymentProperties.commissionRate() : restaurantCommissionRate;
     }
 
     private void requireValidCommissionRate(BigDecimal commissionRate) {

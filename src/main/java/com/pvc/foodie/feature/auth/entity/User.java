@@ -33,6 +33,9 @@ public class User {
     @Column(name = "razorpay_linked_account_id")
     private String razorpayLinkedAccountId;
 
+    @Column(nullable = false)
+    private boolean blocked;
+
     @Enumerated(EnumType.STRING)
     private Role role;
 }

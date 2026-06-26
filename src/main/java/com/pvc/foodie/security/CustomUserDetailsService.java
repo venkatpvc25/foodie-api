@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import org.springframework.security.core.userdetails.*;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.authentication.DisabledException;
 import org.springframework.stereotype.Service;
 
 import com.pvc.foodie.feature.auth.repository.UserRepository;
@@ -30,6 +31,11 @@ public class CustomUserDetailsService implements UserDetailsService {
 
                 log.debug("Security user loaded: userId={}, email={}, role={}", user.getId(), user.getEmail(),
                                 user.getRole());
+                if (user.isBlocked()) {
+                        log.warn("Security user lookup rejected because account is blocked: userId={}, email={}, role={}",
+                                        user.getId(), user.getEmail(), user.getRole());
+                        throw new DisabledException("User account is blocked");
+                }
                 return new org.springframework.security.core.userdetails.User(
                                 user.getEmail(),
                                 user.getPassword(),

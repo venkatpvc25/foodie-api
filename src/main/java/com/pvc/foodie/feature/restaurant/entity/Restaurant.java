@@ -47,8 +47,17 @@ public class Restaurant {
     @Column(name = "is_open", nullable = false)
     private boolean open = true;
 
+    @Column(nullable = false)
+    private boolean approved = true;
+
+    @Column(nullable = false)
+    private boolean suspended;
+
     @Column(name = "razorpay_linked_account_id")
     private String razorpayLinkedAccountId;
+
+    @Column(name = "commission_rate")
+    private BigDecimal commissionRate;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "created_by")

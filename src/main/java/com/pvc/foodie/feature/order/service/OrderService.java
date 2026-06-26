@@ -14,6 +14,9 @@ import com.pvc.foodie.comman.exception.ErrorCode;
 import com.pvc.foodie.feature.address.dto.AddressRequest;
 import com.pvc.foodie.feature.address.entity.Address;
 import com.pvc.foodie.feature.address.repository.AddressRepository;
+import com.pvc.foodie.feature.audit.entity.AuditAction;
+import com.pvc.foodie.feature.audit.entity.AuditEntityType;
+import com.pvc.foodie.feature.audit.service.AuditLogService;
 import com.pvc.foodie.feature.auth.dto.AuthResponse;
 import com.pvc.foodie.feature.auth.entity.Role;
 import com.pvc.foodie.feature.auth.entity.User;
@@ -54,6 +57,7 @@ public class OrderService {
     private static final BigDecimal TAX_RATE = BigDecimal.valueOf(0.05);
 
     private final OrderRepository orderRepository;
+    private final AuditLogService auditLogService;
     private final CartRepository cartRepository;
     private final AddressRepository addressRepository;
     private final MenuItemRepository menuItemRepository;
@@ -236,6 +240,7 @@ public class OrderService {
         requireValidRestaurantStatusUpdate(user, id, order, status);
         OrderStatus oldStatus = order.getStatus();
         order.setStatus(status);
+        recordOrderStatusAudit(user, order, oldStatus, status);
         log.info("Restaurant order status updated: restaurantUserId={}, orderId={}, oldStatus={}, newStatus={}",
                 user.getId(), id, oldStatus, status);
         eventPublisher.publishEvent(new OrderStatusChangedEvent(order, oldStatus, status));
@@ -307,6 +312,13 @@ public class OrderService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "Order not found"));
         requireClaimableDeliveryOrder(user, id, order);
         order.setDeliveryPartner(user);
+        auditLogService.record(
+                user,
+                AuditAction.ORDER_DELIVERY_PARTNER_CHANGED,
+                AuditEntityType.ORDER,
+                order.getId(),
+                order.getOrderNumber(),
+                "Delivery partner claimed order");
         log.info("Delivery order claimed: deliveryPartnerId={}, orderId={}", user.getId(), id);
         eventPublisher.publishEvent(new DeliveryOrderClaimedEvent(order));
         return orderResponseMapper.toResponse(order);
@@ -321,6 +333,7 @@ public class OrderService {
         requirePickupReadyOrder(order);
         OrderStatus oldStatus = order.getStatus();
         order.setStatus(OrderStatus.PICKED_UP);
+        recordOrderStatusAudit(user, order, oldStatus, OrderStatus.PICKED_UP);
         log.info("Delivery order picked up: deliveryPartnerId={}, orderId={}", user.getId(), id);
         eventPublisher.publishEvent(new OrderStatusChangedEvent(order, oldStatus, OrderStatus.PICKED_UP));
         return orderResponseMapper.toResponse(order);
@@ -336,6 +349,7 @@ public class OrderService {
         OrderStatus oldStatus = order.getStatus();
         order.setStatus(OrderStatus.DELIVERED);
         deliveryPayoutService.transferDeliveryChargeIfDelivered(order);
+        recordOrderStatusAudit(user, order, oldStatus, OrderStatus.DELIVERED);
         log.info("Delivery order delivered: deliveryPartnerId={}, orderId={}", user.getId(), id);
         eventPublisher.publishEvent(new OrderStatusChangedEvent(order, oldStatus, OrderStatus.DELIVERED));
         return orderResponseMapper.toResponse(order);
@@ -352,6 +366,7 @@ public class OrderService {
         requireDeliveryStatusTransition(order, status);
         order.setStatus(status);
         deliveryPayoutService.transferDeliveryChargeIfDelivered(order);
+        recordOrderStatusAudit(user, order, oldStatus, status);
         log.info("Delivery order status updated: deliveryPartnerId={}, orderId={}, oldStatus={}, newStatus={}, paymentStatus={}",
                 user.getId(), id, oldStatus, status, order.getPaymentStatus());
         eventPublisher.publishEvent(new OrderStatusChangedEvent(order, oldStatus, status));
@@ -373,6 +388,19 @@ public class OrderService {
         log.info("Guest checkout address saved: userId={}, addressId={}, city={}",
                 user.getId(), saved.getId(), saved.getCity());
         return saved;
+    }
+
+    private void recordOrderStatusAudit(User actor, Order order, OrderStatus oldStatus, OrderStatus newStatus) {
+        if (oldStatus == newStatus) {
+            return;
+        }
+        auditLogService.record(
+                actor,
+                AuditAction.ORDER_STATUS_CHANGED,
+                AuditEntityType.ORDER,
+                order.getId(),
+                order.getOrderNumber(),
+                "Status changed from " + oldStatus + " to " + newStatus);
     }
 
     private PricingSummary priceOrder(String couponCode, UUID restaurantId, BigDecimal subtotal) {

@@ -52,6 +52,18 @@ public class CouponService {
         return coupons.stream().map(this::toResponse).toList();
     }
 
+    @Transactional(readOnly = true)
+    public List<CouponResponse> getAvailableCoupons(UUID restaurantId) {
+        List<Coupon> coupons = restaurantId == null
+                ? couponRepository.findAll()
+                : couponRepository.findByRestaurantIdOrRestaurantIsNullOrderByCodeAsc(restaurantId);
+        return coupons.stream()
+                .filter(this::isPubliclyAvailable)
+                .filter(coupon -> isGlobalCoupon(coupon) || restaurantId != null)
+                .map(this::toResponse)
+                .toList();
+    }
+
     @Transactional
     public CouponResponse createCoupon(CouponRequest request) {
         User user = currentUserService.getCurrentUser();
@@ -161,6 +173,26 @@ public class CouponService {
         requireMinimumOrderAmount(coupon, subtotal);
     }
 
+    private boolean isPubliclyAvailable(Coupon coupon) {
+        Instant now = Instant.now();
+        return coupon.isActive()
+                && isWithinDateWindow(coupon, now)
+                && hasUsageAvailable(coupon);
+    }
+
+    private boolean isWithinDateWindow(Coupon coupon, Instant now) {
+        return (coupon.getValidFrom() == null || !coupon.getValidFrom().isAfter(now))
+                && (coupon.getValidTo() == null || !coupon.getValidTo().isBefore(now));
+    }
+
+    private boolean hasUsageAvailable(Coupon coupon) {
+        return coupon.getUsageLimit() == null || coupon.getUsedCount() < coupon.getUsageLimit();
+    }
+
+    private boolean isGlobalCoupon(Coupon coupon) {
+        return coupon.getRestaurant() == null;
+    }
+
     private void requireActiveCoupon(Coupon coupon) {
         if (!coupon.isActive()) {
             throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Coupon is not active");
@@ -196,7 +228,7 @@ public class CouponService {
     }
 
     private BigDecimal calculateDiscount(Coupon coupon, BigDecimal subtotal) {
-        BigDecimal discount = coupon.getDiscountType() == DiscountType.PERCENTAGE
+        BigDecimal discount = coupon.getDiscountType().isPercentage()
                 ? subtotal.multiply(coupon.getDiscountValue()).divide(HUNDRED, 2, RoundingMode.HALF_UP)
                 : coupon.getDiscountValue();
         if (coupon.getMaxDiscountAmount() != null) {
@@ -221,7 +253,7 @@ public class CouponService {
     }
 
     private void requireValidDiscount(Coupon coupon) {
-        if (coupon.getDiscountType() == DiscountType.PERCENTAGE && coupon.getDiscountValue().compareTo(HUNDRED) > 0) {
+        if (coupon.getDiscountType().isPercentage() && coupon.getDiscountValue().compareTo(HUNDRED) > 0) {
             throw new BusinessException(ErrorCode.VALIDATION_ERROR, "Percentage discount cannot exceed 100");
         }
     }

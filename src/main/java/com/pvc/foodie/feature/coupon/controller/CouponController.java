@@ -35,6 +35,11 @@ public class CouponController {
         return ApiResponse.ok(couponService.getCoupons(restaurantId));
     }
 
+    @GetMapping("/available")
+    public ApiResponse<List<CouponResponse>> getAvailableCoupons(@RequestParam(required = false) UUID restaurantId) {
+        return ApiResponse.ok(couponService.getAvailableCoupons(restaurantId));
+    }
+
     @PostMapping
     public ApiResponse<CouponResponse> createCoupon(@Valid @RequestBody CouponRequest request) {
         return ApiResponse.ok(couponService.createCoupon(request));

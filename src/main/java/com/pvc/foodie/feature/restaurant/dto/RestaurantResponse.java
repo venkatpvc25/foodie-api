@@ -13,6 +13,7 @@ public record RestaurantResponse(
                 BigDecimal latitude,
                 BigDecimal longitude,
                 boolean open,
+                BigDecimal commissionRate,
                 double averageRating,
                 long ratingCount) {
 }

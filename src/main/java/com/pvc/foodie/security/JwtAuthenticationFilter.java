@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
 import org.springframework.stereotype.Component;
@@ -45,7 +46,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         String username = jwtService.extractUsername(token);
 
-        var userDetails = userDetailsService.loadUserByUsername(username);
+        var userDetails = loadUserDetails(username, request);
+        if (userDetails == null) {
+            filterChain.doFilter(request, response);
+            return;
+        }
 
         var authToken = new UsernamePasswordAuthenticationToken(
                 userDetails,
@@ -60,5 +65,17 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 request.getRequestURI());
 
         filterChain.doFilter(request, response);
+    }
+
+    private org.springframework.security.core.userdetails.UserDetails loadUserDetails(
+            String username,
+            HttpServletRequest request) {
+        try {
+            return userDetailsService.loadUserByUsername(username);
+        } catch (AuthenticationException ex) {
+            log.warn("Request continued without authentication because user lookup failed: username={}, method={}, path={}, reason={}",
+                    username, request.getMethod(), request.getRequestURI(), ex.getMessage());
+            return null;
+        }
     }
 }

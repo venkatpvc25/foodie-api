@@ -15,12 +15,16 @@ import com.pvc.foodie.feature.auth.dto.AuthResponse;
 import com.pvc.foodie.feature.auth.dto.CurrentUserResponse;
 import com.pvc.foodie.feature.auth.dto.CustomerSignupRequest;
 import com.pvc.foodie.feature.auth.dto.LoginRequest;
+import com.pvc.foodie.feature.auth.dto.PhoneLoginOtpRequest;
+import com.pvc.foodie.feature.auth.dto.PhoneLoginRequest;
 import com.pvc.foodie.feature.auth.entity.RefreshToken;
 import com.pvc.foodie.feature.auth.entity.Role;
 import com.pvc.foodie.feature.auth.entity.User;
 import com.pvc.foodie.feature.auth.repository.RefreshTokenRepository;
 import com.pvc.foodie.feature.auth.repository.UserRepository;
 import com.pvc.foodie.feature.notification.event.UserSignedUpEvent;
+import com.pvc.foodie.feature.order.dto.GuestCheckoutOtpResponse;
+import com.pvc.foodie.feature.order.service.GuestCheckoutOtpService;
 import com.pvc.foodie.security.JwtService;
 
 import java.time.Instant;
@@ -39,6 +43,7 @@ public class AuthService {
         private final JwtService jwtService;
         private final ApplicationEventPublisher eventPublisher;
         private final AuthProperties authProperties;
+        private final GuestCheckoutOtpService guestCheckoutOtpService;
 
         @Transactional
         public AuthResponse register(CustomerSignupRequest request) {
@@ -94,11 +99,30 @@ public class AuthService {
                                         log.warn("Login failed, email not found: email={}", request.getEmail());
                                         return new BusinessException(ErrorCode.INVALID_CREDENTIALS,
                                                         "Invalid credentials");
-                                });
+                });
 
+                requireUserNotBlocked(user);
                 requireValidPassword(request, user);
 
                 log.info("Login successful: userId={}, email={}, role={}", user.getId(), user.getEmail(),
+                                user.getRole());
+                return issueTokens(user);
+        }
+
+        public GuestCheckoutOtpResponse requestPhoneLoginOtp(PhoneLoginOtpRequest request) {
+                return guestCheckoutOtpService.requestOtp(request.phone());
+        }
+
+        public AuthResponse loginWithPhone(PhoneLoginRequest request) {
+                guestCheckoutOtpService.verify(request.phone(), request.verificationCode());
+                User user = userRepository.findByPhone(request.phone())
+                                .orElseThrow(() -> {
+                                        log.warn("Phone login failed, phone not found: phone={}", request.phone());
+                                        return new BusinessException(ErrorCode.INVALID_CREDENTIALS,
+                                                        "Invalid phone login");
+                                });
+                requireUserNotBlocked(user);
+                log.info("Phone login successful: userId={}, phone={}, role={}", user.getId(), user.getPhone(),
                                 user.getRole());
                 return issueTokens(user);
         }
@@ -114,6 +138,7 @@ public class AuthService {
 
                 requireRefreshTokenActive(stored);
                 requireRefreshTokenNotExpired(stored);
+                requireUserNotBlocked(stored.getUser());
 
                 String newAccess = jwtService.generateAccessToken(
                                 stored.getUser().getEmail());
@@ -179,6 +204,7 @@ public class AuthService {
         }
 
         public AuthResponse issueTokens(User user) {
+                requireUserNotBlocked(user);
                 String accessToken = jwtService.generateAccessToken(user.getEmail());
 
                 RefreshToken refreshToken = new RefreshToken();
@@ -224,6 +250,14 @@ public class AuthService {
                 if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
                         log.warn("Login failed, invalid password: userId={}, email={}", user.getId(), user.getEmail());
                         throw new BusinessException(ErrorCode.INVALID_CREDENTIALS, "Invalid credentials");
+                }
+        }
+
+        private void requireUserNotBlocked(User user) {
+                if (user.isBlocked()) {
+                        log.warn("Auth rejected for blocked user: userId={}, email={}, role={}",
+                                        user.getId(), user.getEmail(), user.getRole());
+                        throw new BusinessException(ErrorCode.ACCESS_DENIED, "User account is blocked");
                 }
         }
 
